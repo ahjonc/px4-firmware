@@ -492,4 +492,3 @@ int sch16t_config_manifest_valid(void)
 	return sch16t_soft_reset_command() == SCH16T_SOFT_RESET_FRAME &&
 	       sch16t_eoi_command() == UINT64_C(0x0D680000038D);
 }
-

@@ -319,4 +319,3 @@ int sch16t_config_manifest_valid(void);
 #endif
 
 #endif /* SCH16T_PROTOCOL_H */
-

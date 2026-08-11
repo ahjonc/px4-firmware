@@ -185,4 +185,3 @@
     "temperature_decode": "arithmetic right shift by 4, then 0.01 C per LSB"
   }
 }
-
