@@ -73,10 +73,13 @@ qshell param set-default EKF2_EV_CTRL 15
 # after updating any default values
 param load
 
-# M0054 propulsion contract. Upstream v1.17 defaults the Mini ESC to
+# M0054 propulsion and semantic-migration contract. Upstream v1.17 defaults the Mini ESC to
 # 5500..15000 RPM; that envelope produced a real zero-stick liftoff on this
 # aircraft. Set the proven envelope on both processors before the ESC driver
-# is allowed to start. Keep these values paired with deploy-time readback.
+# is allowed to start. The old controller database also contains values below
+# v1.17's declared ranges; translate them to the nearest legal values instead
+# of relying on undefined import/clamping behavior. Keep these values paired
+# with deploy-time readback.
 if [ "$PLATFORM" = "M0054" ]; then
     for setting in \
         "BAT1_SOURCE 0" \
@@ -99,8 +102,19 @@ if [ "$PLATFORM" = "M0054" ]; then
         "EKF2_GPS_CTRL 0" \
         "EKF2_HGT_REF 3" \
         "EKF2_RNG_CTRL 0" \
+        "MPC_ACC_DOWN_MAX 2.0" \
+        "MPC_ACC_HOR 2.0" \
+        "MPC_ACC_UP_MAX 2.0" \
+        "MPC_LAND_SPEED 0.6" \
         "MPC_MANTHR_MIN 0.04" \
         "MPC_THR_MIN 0.05" \
+        "MPC_TILTMAX_AIR 20.0" \
+        "MPC_TKO_SPEED 1.0" \
+        "MPC_VEL_MANUAL 3.0" \
+        "MPC_XY_CRUISE 3.0" \
+        "MPC_Z_P 1.5" \
+        "MPC_Z_VEL_MAX_DN 0.5" \
+        "MPC_Z_V_AUTO_DN 0.5" \
         "SENS_IMU_MODE 1" \
         "SYS_HAS_MAG 0" \
         "SYS_HAS_NUM_DIST 1"
