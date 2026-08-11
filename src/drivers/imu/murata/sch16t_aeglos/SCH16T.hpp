@@ -124,5 +124,7 @@ private:
 	perf_counter_t _missed_slot_perf{perf_alloc(PC_COUNT, MODULE_NAME": missed slots")};
 	perf_counter_t _saturation_perf{perf_alloc(PC_COUNT, MODULE_NAME": saturation events")};
 	perf_counter_t _failure_high_water_perf{perf_alloc(PC_COUNT, MODULE_NAME": consecutive-failure high-water")};
+	perf_counter_t _run_elapsed_perf{perf_alloc(PC_ELAPSED, MODULE_NAME": run elapsed")};
+	perf_counter_t _capture_elapsed_perf{perf_alloc(PC_ELAPSED, MODULE_NAME": capture ioctl elapsed")};
+	perf_counter_t _publish_elapsed_perf{perf_alloc(PC_ELAPSED, MODULE_NAME": uORB publish elapsed")};
 };
-

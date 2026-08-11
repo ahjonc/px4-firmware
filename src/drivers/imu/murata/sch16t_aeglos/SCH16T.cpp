@@ -44,6 +44,19 @@
 namespace
 {
 
+class PerfScope
+{
+public:
+	explicit PerfScope(perf_counter_t counter) : _counter(counter) { perf_begin(_counter); }
+	~PerfScope() { perf_end(_counter); }
+
+	PerfScope(const PerfScope &) = delete;
+	PerfScope &operator=(const PerfScope &) = delete;
+
+private:
+	perf_counter_t _counter;
+};
+
 uint32_t sch16t_compose_device_id(const I2CSPIDriverConfig &config)
 {
 	// Same DeviceId composition the posix device::SPI base produces, so the
@@ -90,6 +103,9 @@ SCH16T::~SCH16T()
 	perf_free(_missed_slot_perf);
 	perf_free(_saturation_perf);
 	perf_free(_failure_high_water_perf);
+	perf_free(_run_elapsed_perf);
+	perf_free(_capture_elapsed_perf);
+	perf_free(_publish_elapsed_perf);
 }
 
 int SCH16T::init()
@@ -300,6 +316,7 @@ int SCH16T::Bringup()
 
 int SCH16T::CaptureBatch(uint64_t responses[SCH16T_CAPTURE_FRAME_COUNT], hrt_abstime &timestamp_mid)
 {
+	PerfScope capture_elapsed(_capture_elapsed_perf);
 	uint64_t commands[SCH16T_CAPTURE_FRAME_COUNT];
 	sch16t_capture_read_commands(commands);
 
@@ -353,6 +370,8 @@ void SCH16T::CycleFailed(perf_counter_t counter)
 
 void SCH16T::RunImpl()
 {
+	PerfScope run_elapsed(_run_elapsed_perf);
+
 	if (_failed) {
 		return;
 	}
@@ -460,11 +479,15 @@ void SCH16T::RunImpl()
 
 	_px4_gyro.set_error_count(error_count);
 	_px4_gyro.set_temperature(temperature_c);
-	_px4_gyro.update(timestamp_sample, gyro_body[0], gyro_body[1], gyro_body[2]);
 
-	_px4_accel.set_error_count(error_count);
-	_px4_accel.set_temperature(temperature_c);
-	_px4_accel.update(timestamp_sample, accel_body[0], accel_body[1], accel_body[2]);
+	{
+		PerfScope publish_elapsed(_publish_elapsed_perf);
+		_px4_gyro.update(timestamp_sample, gyro_body[0], gyro_body[1], gyro_body[2]);
+
+		_px4_accel.set_error_count(error_count);
+		_px4_accel.set_temperature(temperature_c);
+		_px4_accel.update(timestamp_sample, accel_body[0], accel_body[1], accel_body[2]);
+	}
 
 	++_published_samples;
 
@@ -517,5 +540,7 @@ void SCH16T::print_status()
 	perf_print_counter(_missed_slot_perf);
 	perf_print_counter(_saturation_perf);
 	perf_print_counter(_failure_high_water_perf);
+	perf_print_counter(_run_elapsed_perf);
+	perf_print_counter(_capture_elapsed_perf);
+	perf_print_counter(_publish_elapsed_perf);
 }
-
