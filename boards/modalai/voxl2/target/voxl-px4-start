@@ -140,7 +140,9 @@ fi
 # independent fallback.
 if [ "$PLATFORM" = "M0054" ]; then
     /bin/echo "Starting Aeglos SCH16T driver"
-    sch16t start || exit 1
+    if ! sch16t start; then
+        /bin/echo "WARNING: SCH16T unavailable; continuing on the independent SLPI ICM42688P fallback"
+    fi
 fi
 
 # Start Invensense ICP 101xx barometer built on to VOXL 2
