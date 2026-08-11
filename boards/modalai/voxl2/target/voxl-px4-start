@@ -89,7 +89,9 @@ if [ "$PLATFORM" = "M0054" ]; then
         "VOXL_ESC_FUNC2 103" \
         "VOXL_ESC_FUNC3 101" \
         "VOXL_ESC_FUNC4 104" \
-        "VOXL_ESC_PUB_BST 1"
+        "VOXL_ESC_PUB_BST 1" \
+        "MPC_MANTHR_MIN 0.04" \
+        "MPC_THR_MIN 0.05"
     do
         name=${setting% *}
         value=${setting#* }
