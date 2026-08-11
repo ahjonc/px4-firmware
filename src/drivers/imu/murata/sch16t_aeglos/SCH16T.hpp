@@ -81,8 +81,11 @@ private:
 	static constexpr unsigned BRINGUP_ATTEMPTS{3};
 	static constexpr unsigned MAX_CONSECUTIVE_FAILURES{64};
 	static constexpr uint32_t PUBLISH_QUEUE_CAPACITY{64};
+	static constexpr uint8_t PUBLISH_BATCH_SAMPLES{4};
 	static constexpr int PUBLISH_CPU{7};
 	static constexpr int PUBLISH_PRIORITY_OFFSET{-19};
+	static constexpr float GYRO_FIFO_SCALE{(float)(SCH16T_PX4_GYRO_RANGE_RAD / 32760.0)};
+	static constexpr float ACCEL_FIFO_SCALE{(float)(SCH16T_PX4_ACCEL_RANGE_MPS2 / 32760.0)};
 
 	struct PendingSample {
 		hrt_abstime timestamp_sample;
@@ -101,6 +104,7 @@ private:
 	void StopPublisher();
 	bool QueueSample(const PendingSample &sample);
 	void PublisherLoop();
+	void PublishBatch(const PendingSample samples[PUBLISH_BATCH_SAMPLES]);
 	static void *PublisherTrampoline(void *context);
 	void AccountMissedSlots(const hrt_abstime &cycle_start);
 	void CycleFailed(perf_counter_t counter);

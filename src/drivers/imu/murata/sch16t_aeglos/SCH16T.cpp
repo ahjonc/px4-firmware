@@ -40,6 +40,7 @@
 #include <px4_platform_common/time.h>
 
 #include <errno.h>
+#include <math.h>
 #include <sched.h>
 #include <string.h>
 
@@ -58,6 +59,20 @@ public:
 private:
 	perf_counter_t _counter;
 };
+
+int16_t fifo_quantize(const float value, const float scale)
+{
+	long quantized = lrintf(value / scale);
+
+	if (quantized > 32760) {
+		quantized = 32760;
+
+	} else if (quantized < -32760) {
+		quantized = -32760;
+	}
+
+	return (int16_t)quantized;
+}
 
 uint32_t sch16t_compose_device_id(const I2CSPIDriverConfig &config)
 {
@@ -82,16 +97,12 @@ SCH16T::SCH16T(const I2CSPIDriverConfig &config) :
 	_px4_accel(sch16t_compose_device_id(config), ROTATION_NONE),
 	_px4_gyro(sch16t_compose_device_id(config), ROTATION_NONE)
 {
-	// Samples are converted to SI in-driver and published with scale 1.0. The
-	// wrappers clamp their clipping threshold to INT16_MAX in *pre-scale units*
-	// (PX4Accelerometer.cpp: _clip_limit = constrain(range/scale*0.999, 0,
-	// INT16_MAX)); feeding 20-bit raw counts would clamp the accel threshold to
-	// 32767 LSB = 10.24 m/s^2 and flag clipping on any modest climb, feeding
-	// EKF2's bad-accel logic. With scale 1.0 the threshold is the true device
-	// range in SI and "clipping" means device saturation, as intended.
-	_px4_gyro.set_scale(1.f);
+	// The standard PX4 FIFO transport carries int16 samples plus a float scale.
+	// Quantize the full physical range into 32760 counts (leaving margin for the
+	// wrapper's endpoint clipping test) after the calibrated body rotation.
+	_px4_gyro.set_scale(GYRO_FIFO_SCALE);
 	_px4_gyro.set_range((float)SCH16T_PX4_GYRO_RANGE_RAD);		// +/-300 deg/s
-	_px4_accel.set_scale(1.f);
+	_px4_accel.set_scale(ACCEL_FIFO_SCALE);
 	_px4_accel.set_range((float)SCH16T_PX4_ACCEL_RANGE_MPS2);	// +/-80 m/s^2
 }
 
@@ -448,8 +459,55 @@ void *SCH16T::PublisherTrampoline(void *context)
 	return nullptr;
 }
 
+void SCH16T::PublishBatch(const PendingSample samples[PUBLISH_BATCH_SAMPLES])
+{
+	sensor_accel_fifo_s accel {};
+	sensor_gyro_fifo_s gyro {};
+	accel.timestamp_sample = samples[PUBLISH_BATCH_SAMPLES - 1].timestamp_sample;
+	gyro.timestamp_sample = accel.timestamp_sample;
+	accel.samples = PUBLISH_BATCH_SAMPLES;
+	gyro.samples = PUBLISH_BATCH_SAMPLES;
+	const float dt_us = (float)(samples[PUBLISH_BATCH_SAMPLES - 1].timestamp_sample - samples[0].timestamp_sample)
+			    / (float)(PUBLISH_BATCH_SAMPLES - 1);
+	accel.dt = dt_us;
+	gyro.dt = dt_us;
+
+	for (uint8_t i = 0; i < PUBLISH_BATCH_SAMPLES; i++) {
+		gyro.x[i] = fifo_quantize(samples[i].gyro_body[0], GYRO_FIFO_SCALE);
+		gyro.y[i] = fifo_quantize(samples[i].gyro_body[1], GYRO_FIFO_SCALE);
+		gyro.z[i] = fifo_quantize(samples[i].gyro_body[2], GYRO_FIFO_SCALE);
+		accel.x[i] = fifo_quantize(samples[i].accel_body[0], ACCEL_FIFO_SCALE);
+		accel.y[i] = fifo_quantize(samples[i].accel_body[1], ACCEL_FIFO_SCALE);
+		accel.z[i] = fifo_quantize(samples[i].accel_body[2], ACCEL_FIFO_SCALE);
+	}
+
+	const PendingSample &last_sample = samples[PUBLISH_BATCH_SAMPLES - 1];
+	_px4_accel.set_error_count(last_sample.error_count);
+	_px4_accel.set_temperature(last_sample.temperature_c);
+	_px4_gyro.set_error_count(last_sample.error_count);
+	_px4_gyro.set_temperature(last_sample.temperature_c);
+	perf_set_elapsed(_publish_queue_age_perf, hrt_absolute_time() - samples[0].timestamp_sample);
+
+	{
+		PerfScope publish_elapsed(_publish_elapsed_perf);
+		// Publish accel first: sensor_gyro is the DSP VehicleIMU callback trigger,
+		// so its matching accel batch is already available when gyro arrives.
+		_px4_accel.updateFIFO(accel);
+		_px4_gyro.updateFIFO(gyro);
+	}
+
+	_published_samples.fetch_add(PUBLISH_BATCH_SAMPLES);
+
+	if (_publish_first_timestamp.load() == 0) {
+		_publish_first_timestamp.store(samples[0].timestamp_sample);
+	}
+}
+
 void SCH16T::PublisherLoop()
 {
+	PendingSample batch[PUBLISH_BATCH_SAMPLES] {};
+	uint8_t batch_samples = 0;
+
 	while (!_publisher_should_exit.load()) {
 		while (!_publisher_should_exit.load()) {
 			const uint32_t tail = _publish_tail.load();
@@ -459,27 +517,12 @@ void SCH16T::PublisherLoop()
 				break;
 			}
 
-			const PendingSample sample = _publish_queue[tail];
-			perf_set_elapsed(_publish_queue_age_perf, hrt_absolute_time() - sample.timestamp_sample);
-
-			{
-				PerfScope publish_elapsed(_publish_elapsed_perf);
-				_px4_gyro.set_error_count(sample.error_count);
-				_px4_gyro.set_temperature(sample.temperature_c);
-				_px4_gyro.update(sample.timestamp_sample, sample.gyro_body[0], sample.gyro_body[1], sample.gyro_body[2]);
-
-				_px4_accel.set_error_count(sample.error_count);
-				_px4_accel.set_temperature(sample.temperature_c);
-				_px4_accel.update(sample.timestamp_sample, sample.accel_body[0], sample.accel_body[1], sample.accel_body[2]);
-			}
-
+			batch[batch_samples++] = _publish_queue[tail];
 			_publish_tail.store((tail + 1) % PUBLISH_QUEUE_CAPACITY);
-			_published_samples.fetch_add(1);
 
-			hrt_abstime first_timestamp = _publish_first_timestamp.load();
-
-			if (first_timestamp == 0) {
-				_publish_first_timestamp.store(sample.timestamp_sample);
+			if (batch_samples == PUBLISH_BATCH_SAMPLES) {
+				PublishBatch(batch);
+				batch_samples = 0;
 			}
 		}
 
