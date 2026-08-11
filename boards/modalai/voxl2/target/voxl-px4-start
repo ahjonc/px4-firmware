@@ -73,6 +73,31 @@ qshell param set-default EKF2_EV_CTRL 15
 # after updating any default values
 param load
 
+# M0054 propulsion contract. Upstream v1.17 defaults the Mini ESC to
+# 5500..15000 RPM; that envelope produced a real zero-stick liftoff on this
+# aircraft. Set the proven envelope on both processors before the ESC driver
+# is allowed to start. Keep these values paired with deploy-time readback.
+if [ "$PLATFORM" = "M0054" ]; then
+    for setting in \
+        "BAT1_SOURCE 0" \
+        "VOXL_ESC_BAUD 2000000" \
+        "VOXL_ESC_CONFIG 1" \
+        "VOXL_ESC_MODE 0" \
+        "VOXL_ESC_RPM_MIN 2000" \
+        "VOXL_ESC_RPM_MAX 12000" \
+        "VOXL_ESC_FUNC1 102" \
+        "VOXL_ESC_FUNC2 103" \
+        "VOXL_ESC_FUNC3 101" \
+        "VOXL_ESC_FUNC4 104" \
+        "VOXL_ESC_PUB_BST 1"
+    do
+        name=${setting% *}
+        value=${setting#* }
+        param set "$name" "$value" || exit 1
+        qshell param set "$name" "$value" || exit 1
+    done
+fi
+
 # IMU (accelerometer / gyroscope)
 if [ "$PLATFORM" == "M0104" ]; then
     /bin/echo "Starting IMU driver with rotation 12"
@@ -80,6 +105,14 @@ if [ "$PLATFORM" == "M0104" ]; then
 else
     /bin/echo "Starting IMU driver with no rotation"
     qshell icm42688p start -s
+fi
+
+# The Aeglos SCH16T is an APPS-side SafeSPI sensor and must advertise before
+# the DSP sensors voter and EKF are started. The SLPI ICM remains an
+# independent fallback.
+if [ "$PLATFORM" = "M0054" ]; then
+    /bin/echo "Starting Aeglos SCH16T driver"
+    sch16t start || exit 1
 fi
 
 # Start Invensense ICP 101xx barometer built on to VOXL 2
