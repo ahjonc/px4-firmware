@@ -105,6 +105,32 @@ static inline void sch16t_px4_apply_sensor_to_body(const int32_t raw[3], float o
 }
 
 /*
+ * Exact payload equality across the six inertial channels.  This is diagnostic,
+ * not a timing source: unlike the data-counter registers these values are the
+ * measurements PX4 would actually consume.  Equality across all six signed
+ * 20-bit values is a strong indication that an over-poll repeated one held
+ * device epoch, while a changed value proves that at least one channel updated.
+ */
+static inline int sch16t_px4_inertial_payload_equal(const struct sch16t_sample *previous,
+		const struct sch16t_sample *current)
+{
+	unsigned int axis;
+
+	if (previous == NULL || current == NULL) {
+		return 0;
+	}
+
+	for (axis = 0; axis < 3; ++axis) {
+		if (previous->gyro[axis] != current->gyro[axis] ||
+		    previous->accel[axis] != current->accel[axis]) {
+			return 0;
+		}
+	}
+
+	return 1;
+}
+
+/*
  * Pacing decision from bracketed data counters: DUPLICATE means the device is still
  * on the same decimation epoch (the normal ~8% over-poll case at the fixed 1240 us
  * host interval) and the sample must not be published; NEXT publishes; GAP publishes
@@ -143,4 +169,3 @@ static inline enum sch16t_px4_pacing sch16t_px4_classify_bracket(
 #endif
 
 #endif /* SCH16T_PX4_LOGIC_H */
-

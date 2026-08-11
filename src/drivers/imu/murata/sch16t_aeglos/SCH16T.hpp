@@ -122,6 +122,8 @@ private:
 	struct sch16t_data_counter_bracket _previous_bracket {};
 	hrt_abstime _previous_timestamp{0};
 	bool _bracket_valid{false};
+	struct sch16t_sample _previous_payload {};
+	bool _payload_valid{false};
 
 	/* Out-of-frame reply pipeline primed (a batch was issued and its replies
 	 * discarded). Dropped on any transfer/decode failure: after an error the
@@ -155,6 +157,11 @@ private:
 	perf_counter_t _decode_error_perf{perf_alloc(PC_COUNT, MODULE_NAME": decode errors")};
 	perf_counter_t _duplicate_perf{perf_alloc(PC_COUNT, MODULE_NAME": duplicate epochs")};
 	perf_counter_t _gap_perf{perf_alloc(PC_COUNT, MODULE_NAME": epoch gaps")};
+	perf_counter_t _payload_duplicate_perf{perf_alloc(PC_COUNT, MODULE_NAME": exact payload duplicates")};
+	perf_counter_t _counter_advance_payload_duplicate_perf{
+		perf_alloc(PC_COUNT, MODULE_NAME": counter advance with duplicate payload")};
+	perf_counter_t _counter_duplicate_payload_changed_perf{
+		perf_alloc(PC_COUNT, MODULE_NAME": counter duplicate with changed payload")};
 	perf_counter_t _missed_slot_perf{perf_alloc(PC_COUNT, MODULE_NAME": missed slots")};
 	perf_counter_t _saturation_perf{perf_alloc(PC_COUNT, MODULE_NAME": saturation events")};
 	perf_counter_t _failure_high_water_perf{perf_alloc(PC_COUNT, MODULE_NAME": consecutive-failure high-water")};

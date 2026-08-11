@@ -320,6 +320,30 @@ static void test_pacing_classification(void)
 	      "reserved counter bits did not fail closed");
 }
 
+static void test_inertial_payload_equality(void)
+{
+	struct sch16t_sample previous = {0};
+	struct sch16t_sample current = {0};
+
+	previous.gyro[0] = current.gyro[0] = 101;
+	previous.gyro[1] = current.gyro[1] = -202;
+	previous.gyro[2] = current.gyro[2] = 303;
+	previous.accel[0] = current.accel[0] = -404;
+	previous.accel[1] = current.accel[1] = 505;
+	previous.accel[2] = current.accel[2] = -606;
+	previous.temperature = 10;
+	current.temperature = 11;
+
+	CHECK(sch16t_px4_inertial_payload_equal(&previous, &current) == 1,
+	      "temperature-only change altered inertial payload equality");
+
+	current.accel[2] += 1;
+	CHECK(sch16t_px4_inertial_payload_equal(&previous, &current) == 0,
+	      "one-LSB inertial change was classified as equal");
+	CHECK(sch16t_px4_inertial_payload_equal(NULL, &current) == 0,
+	      "NULL previous payload was classified as equal");
+}
+
 /* ---- sensor-to-body transform -------------------------------------------------- */
 
 static void test_sensor_to_body_transform(void)
@@ -439,6 +463,7 @@ int main(int argc, char *argv[])
 	test_status_responses(json);
 	test_capture_reorder();
 	test_pacing_classification();
+	test_inertial_payload_equality();
 	test_sensor_to_body_transform();
 	test_sample_decode_and_saturation();
 	test_scale_contract(json);
@@ -448,4 +473,3 @@ int main(int argc, char *argv[])
 	printf("%s: %d checks, %d failures\n", g_failures == 0 ? "PASS" : "FAIL", g_checks, g_failures);
 	return g_failures == 0 ? 0 : 1;
 }
-

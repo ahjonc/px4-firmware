@@ -116,6 +116,9 @@ SCH16T::~SCH16T()
 	perf_free(_decode_error_perf);
 	perf_free(_duplicate_perf);
 	perf_free(_gap_perf);
+	perf_free(_payload_duplicate_perf);
+	perf_free(_counter_advance_payload_duplicate_perf);
+	perf_free(_counter_duplicate_payload_changed_perf);
 	perf_free(_missed_slot_perf);
 	perf_free(_saturation_perf);
 	perf_free(_failure_high_water_perf);
@@ -622,11 +625,28 @@ void SCH16T::RunImpl()
 	// Transport and decode are healthy for this cycle.
 	_consecutive_failures = 0;
 
+	const bool payload_duplicate = _payload_valid && sch16t_px4_inertial_payload_equal(&_previous_payload, &sample);
+
+	if (payload_duplicate) {
+		perf_count(_payload_duplicate_perf);
+	}
+
+	_previous_payload = sample;
+	_payload_valid = true;
+
 	if (_bracket_valid) {
 		struct sch16t_counter_vector vector;
 		const uint64_t elapsed_ns = (timestamp_sample - _previous_timestamp) * 1000;
+		const enum sch16t_px4_pacing pacing =
+			sch16t_px4_classify_bracket(&_previous_bracket, &bracket, elapsed_ns, &vector);
 
-		switch (sch16t_px4_classify_bracket(&_previous_bracket, &bracket, elapsed_ns, &vector)) {
+		if (pacing == SCH16T_PX4_PACING_SKIP && !payload_duplicate) {
+			perf_count(_counter_duplicate_payload_changed_perf);
+		} else if (pacing != SCH16T_PX4_PACING_SKIP && payload_duplicate) {
+			perf_count(_counter_advance_payload_duplicate_perf);
+		}
+
+		switch (pacing) {
 		case SCH16T_PX4_PACING_SKIP:
 			// Same device epoch: the normal ~8% over-poll case. Nothing published;
 			// the previous bracket/timestamp stay anchored at the epoch's first
@@ -738,6 +758,9 @@ void SCH16T::print_status()
 	perf_print_counter(_decode_error_perf);
 	perf_print_counter(_duplicate_perf);
 	perf_print_counter(_gap_perf);
+	perf_print_counter(_payload_duplicate_perf);
+	perf_print_counter(_counter_advance_payload_duplicate_perf);
+	perf_print_counter(_counter_duplicate_payload_changed_perf);
 	perf_print_counter(_missed_slot_perf);
 	perf_print_counter(_saturation_perf);
 	perf_print_counter(_failure_high_water_perf);
