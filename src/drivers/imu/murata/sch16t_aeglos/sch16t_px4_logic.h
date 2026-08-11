@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: BSD-3-Clause */
 /*
- * SCH16T PX4 driver logic that is pure computation: epoch pacing classification,
+ * SCH16T PX4 driver logic that is pure computation: counter diagnostics,
  * saturation flag extraction, SI scale factors, and the sensor-to-body rotation.
  *
  * Deliberately free of PX4 headers so the host conformance harness
@@ -131,11 +131,10 @@ static inline int sch16t_px4_inertial_payload_equal(const struct sch16t_sample *
 }
 
 /*
- * Pacing decision from bracketed data counters: DUPLICATE means the device is still
- * on the same decimation epoch (the normal ~8% over-poll case at the fixed 1240 us
- * host interval) and the sample must not be published; NEXT publishes; GAP publishes
- * and is accounted. Elapsed time is host time between the two compared brackets
- * (batch midpoints; both brackets read at the same in-batch phase).
+ * Diagnostic classification from bracketed data counters. The registers latch when
+ * read, so this result must not gate or timestamp publication. Elapsed time is host
+ * time between the two compared brackets (batch midpoints; both brackets read at the
+ * same in-batch phase).
  */
 enum sch16t_px4_pacing {
 	SCH16T_PX4_PACING_SKIP = 0,

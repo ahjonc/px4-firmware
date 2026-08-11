@@ -296,7 +296,7 @@ static void test_pacing_classification(void)
 	struct sch16t_counter_vector vector;
 	struct sch16t_data_counter_bracket previous = { 0x0555, 0x0555, 0x0555, 0x0555 };
 
-	/* Same epoch, 1240 us later: the normal over-poll duplicate -> skip. */
+	/* Same counter register pattern is classified for diagnostics only. */
 	struct sch16t_data_counter_bracket duplicate = previous;
 	CHECK(sch16t_px4_classify_bracket(&previous, &duplicate, 1240000ULL, &vector) == SCH16T_PX4_PACING_SKIP,
 	      "duplicate epoch not classified as skip");

@@ -646,21 +646,13 @@ void SCH16T::RunImpl()
 			perf_count(_counter_advance_payload_duplicate_perf);
 		}
 
-		switch (pacing) {
-		case SCH16T_PX4_PACING_SKIP:
-			// Same device epoch: the normal ~8% over-poll case. Nothing published;
-			// the previous bracket/timestamp stay anchored at the epoch's first
-			// observation.
+		// The counters latch on read, so these classifications describe the
+		// register-read pattern only. They must never gate or timestamp samples.
+		if (pacing == SCH16T_PX4_PACING_SKIP) {
 			perf_count(_duplicate_perf);
-			return;
 
-		case SCH16T_PX4_PACING_PUBLISH_GAP:
+		} else if (pacing == SCH16T_PX4_PACING_PUBLISH_GAP) {
 			perf_count(_gap_perf);
-			break;
-
-		case SCH16T_PX4_PACING_PUBLISH:
-		default:
-			break;
 		}
 	}
 

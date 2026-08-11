@@ -74,10 +74,11 @@ public:
 	void print_status() override;
 
 private:
-	/* Fixed host poll interval: ~806 Hz, deliberately over the F_PRIM device-ODR
-	 * envelope (690.6..784.4 Hz); the bracketed data counter discards duplicate
-	 * epochs so publication lands at the true device rate (~743 Hz). */
-	static constexpr uint32_t SAMPLE_INTERVAL_US{1240};
+	/* The SCH data-counter nibbles latch when their registers are read and are not
+	 * a free-running sample clock. Pace from the qualified nominal ODR, as the
+	 * flight-proven userspace collector did; counters remain diagnostics only. */
+	static constexpr uint32_t SAMPLE_INTERVAL_US{
+		(1000000U + SCH16T_NOMINAL_ODR_HZ / 2U) / SCH16T_NOMINAL_ODR_HZ};
 	static constexpr unsigned BRINGUP_ATTEMPTS{3};
 	static constexpr unsigned MAX_CONSECUTIVE_FAILURES{64};
 	static constexpr uint32_t PUBLISH_QUEUE_CAPACITY{64};
