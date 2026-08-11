@@ -80,7 +80,8 @@ param load
 # v1.17's declared ranges; translate them to the nearest legal values instead
 # of relying on undefined import/clamping behavior. Keep these values paired
 # with deploy-time readback.
-if [ "$PLATFORM" = "M0054" ]; then
+apply_m0054_parameter_contract()
+{
     for setting in \
         "BAT1_SOURCE 0" \
         "VOXL_ESC_BAUD 2000000" \
@@ -124,6 +125,10 @@ if [ "$PLATFORM" = "M0054" ]; then
         param set "$name" "$value" || exit 1
         qshell param set "$name" "$value" || exit 1
     done
+}
+
+if [ "$PLATFORM" = "M0054" ]; then
+    apply_m0054_parameter_contract
 fi
 
 # IMU (accelerometer / gyroscope)
@@ -311,6 +316,16 @@ mavlink start -x -u 14558 -o 14559 -r 100000 -n lo
 # the log file may be corrupted. Rather than using "-e" option it's better
 # to use the SDLOG_MODE to do that.
 logger start -t -b 256
+
+# The APPS and SLPI parameter stores finish initializing asynchronously. Reassert
+# the M0054 contract after all DSP flight modules are live, then persist the same
+# bytes that deploy-time readback inspects. The first application above remains
+# mandatory because the safe Mini ESC envelope must exist before its driver starts.
+if [ "$PLATFORM" = "M0054" ]; then
+    apply_m0054_parameter_contract
+    param save || exit 1
+    qshell param save || exit 1
+fi
 
 mavlink boot_complete
 
