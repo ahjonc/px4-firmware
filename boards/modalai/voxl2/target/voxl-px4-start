@@ -324,7 +324,6 @@ logger start -t -b 256
 if [ "$PLATFORM" = "M0054" ]; then
     apply_m0054_parameter_contract
     param save || exit 1
-    qshell param save || exit 1
 fi
 
 mavlink boot_complete
