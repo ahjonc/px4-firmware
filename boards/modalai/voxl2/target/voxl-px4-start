@@ -90,8 +90,20 @@ if [ "$PLATFORM" = "M0054" ]; then
         "VOXL_ESC_FUNC3 101" \
         "VOXL_ESC_FUNC4 104" \
         "VOXL_ESC_PUB_BST 1" \
+        "CA_ROTOR_COUNT 4" \
+        "COM_FAIL_ACT_T 0" \
+        "COM_RC_IN_MODE 0" \
+        "EKF2_BARO_CTRL 1" \
+        "EKF2_DECL_TYPE 3" \
+        "EKF2_EV_CTRL 15" \
+        "EKF2_GPS_CTRL 0" \
+        "EKF2_HGT_REF 3" \
+        "EKF2_RNG_CTRL 0" \
         "MPC_MANTHR_MIN 0.04" \
-        "MPC_THR_MIN 0.05"
+        "MPC_THR_MIN 0.05" \
+        "SENS_IMU_MODE 1" \
+        "SYS_HAS_MAG 0" \
+        "SYS_HAS_NUM_DIST 1"
     do
         name=${setting% *}
         value=${setting#* }
