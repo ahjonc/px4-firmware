@@ -39,6 +39,8 @@
 #include <px4_platform_common/log.h>
 #include <px4_platform_common/time.h>
 
+#include <errno.h>
+#include <sched.h>
 #include <string.h>
 
 namespace
@@ -95,6 +97,9 @@ SCH16T::SCH16T(const I2CSPIDriverConfig &config) :
 
 SCH16T::~SCH16T()
 {
+	ScheduleClear();
+	StopPublisher();
+
 	perf_free(_transfer_error_perf);
 	perf_free(_crc_error_perf);
 	perf_free(_decode_error_perf);
@@ -106,6 +111,8 @@ SCH16T::~SCH16T()
 	perf_free(_run_elapsed_perf);
 	perf_free(_capture_elapsed_perf);
 	perf_free(_publish_elapsed_perf);
+	perf_free(_publish_queue_age_perf);
+	perf_free(_publish_queue_overflow_perf);
 }
 
 int SCH16T::init()
@@ -146,6 +153,12 @@ int SCH16T::init()
 	PX4_INFO("SCH16T SN %04X-%04X-%04X streaming on %s at %u Hz poll, accel instance %d, gyro instance %d",
 		 _identity.serial_id1, _identity.serial_id2, _identity.serial_id3,
 		 dev_path, 1000000 / SAMPLE_INTERVAL_US, accel_instance, gyro_instance);
+
+	if (StartPublisher() != PX4_OK) {
+		PX4_ERR("failed to start the bounded APPS-to-DSP publisher");
+		_transport.close();
+		return PX4_ERROR;
+	}
 
 	ScheduleOnInterval(SAMPLE_INTERVAL_US, SAMPLE_INTERVAL_US);
 
@@ -330,6 +343,150 @@ int SCH16T::CaptureBatch(uint64_t responses[SCH16T_CAPTURE_FRAME_COUNT], hrt_abs
 	return ret;
 }
 
+int SCH16T::StartPublisher()
+{
+	if (px4_sem_init(&_publisher_sem, 0, 0) != 0) {
+		PX4_ERR("publisher semaphore init failed: %s", strerror(errno));
+		return PX4_ERROR;
+	}
+
+	_publisher_sem_initialized = true;
+	(void)px4_sem_setprotocol(&_publisher_sem, SEM_PRIO_NONE);
+	_publisher_should_exit.store(false);
+
+	pthread_attr_t attributes;
+	int ret = pthread_attr_init(&attributes);
+
+	if (ret != 0) {
+		PX4_ERR("publisher pthread attr init failed: %s", strerror(ret));
+		StopPublisher();
+		return PX4_ERROR;
+	}
+
+	struct sched_param scheduling {};
+	scheduling.sched_priority = sched_get_priority_max(SCHED_FIFO) + PUBLISH_PRIORITY_OFFSET;
+	cpu_set_t cpu_set;
+	CPU_ZERO(&cpu_set);
+	CPU_SET(PUBLISH_CPU, &cpu_set);
+
+	if ((ret = pthread_attr_setinheritsched(&attributes, PTHREAD_EXPLICIT_SCHED)) != 0
+	    || (ret = pthread_attr_setschedpolicy(&attributes, SCHED_FIFO)) != 0
+	    || (ret = pthread_attr_setschedparam(&attributes, &scheduling)) != 0
+	    || (ret = pthread_attr_setaffinity_np(&attributes, sizeof(cpu_set), &cpu_set)) != 0) {
+		PX4_ERR("publisher pthread attributes failed: %s", strerror(ret));
+		(void)pthread_attr_destroy(&attributes);
+		StopPublisher();
+		return PX4_ERROR;
+	}
+
+	ret = pthread_create(&_publisher_thread, &attributes, PublisherTrampoline, this);
+	(void)pthread_attr_destroy(&attributes);
+
+	if (ret != 0) {
+		PX4_ERR("publisher pthread create failed: %s", strerror(ret));
+		StopPublisher();
+		return PX4_ERROR;
+	}
+
+	_publisher_started = true;
+	PX4_INFO("APPS-to-DSP publisher running on CPU %d at FIFO priority %d", PUBLISH_CPU, scheduling.sched_priority);
+	return PX4_OK;
+}
+
+void SCH16T::StopPublisher()
+{
+	if (_publisher_started) {
+		_publisher_should_exit.store(true);
+		(void)px4_sem_post(&_publisher_sem);
+		(void)pthread_join(_publisher_thread, nullptr);
+		_publisher_started = false;
+	}
+
+	if (_publisher_sem_initialized) {
+		(void)px4_sem_destroy(&_publisher_sem);
+		_publisher_sem_initialized = false;
+	}
+}
+
+bool SCH16T::QueueSample(const PendingSample &sample)
+{
+	const uint32_t head = _publish_head.load();
+	const uint32_t tail = _publish_tail.load();
+	const uint32_t next_head = (head + 1) % PUBLISH_QUEUE_CAPACITY;
+
+	if (next_head == tail) {
+		perf_count(_publish_queue_overflow_perf);
+		PX4_ERR("publisher queue overflow - stopping SCH16T publication");
+		_failed = true;
+		exit_and_cleanup();
+		return false;
+	}
+
+	_publish_queue[head] = sample;
+	_publish_head.store(next_head);
+
+	const uint32_t queue_depth = (next_head + PUBLISH_QUEUE_CAPACITY - tail) % PUBLISH_QUEUE_CAPACITY;
+
+	if (queue_depth > _publish_queue_high_water) {
+		_publish_queue_high_water = queue_depth;
+	}
+
+	// Only wake on an empty-to-nonempty transition. The publisher drains the
+	// bounded SPSC queue fully, so one wake covers every sample already queued.
+	if (head == tail) {
+		(void)px4_sem_post(&_publisher_sem);
+	}
+
+	return true;
+}
+
+void *SCH16T::PublisherTrampoline(void *context)
+{
+	auto *driver = static_cast<SCH16T *>(context);
+	(void)pthread_setname_np(pthread_self(), "sch16t_pub");
+	driver->PublisherLoop();
+	return nullptr;
+}
+
+void SCH16T::PublisherLoop()
+{
+	while (!_publisher_should_exit.load()) {
+		while (!_publisher_should_exit.load()) {
+			const uint32_t tail = _publish_tail.load();
+			const uint32_t head = _publish_head.load();
+
+			if (tail == head) {
+				break;
+			}
+
+			const PendingSample sample = _publish_queue[tail];
+			perf_set_elapsed(_publish_queue_age_perf, hrt_absolute_time() - sample.timestamp_sample);
+
+			{
+				PerfScope publish_elapsed(_publish_elapsed_perf);
+				_px4_gyro.set_error_count(sample.error_count);
+				_px4_gyro.set_temperature(sample.temperature_c);
+				_px4_gyro.update(sample.timestamp_sample, sample.gyro_body[0], sample.gyro_body[1], sample.gyro_body[2]);
+
+				_px4_accel.set_error_count(sample.error_count);
+				_px4_accel.set_temperature(sample.temperature_c);
+				_px4_accel.update(sample.timestamp_sample, sample.accel_body[0], sample.accel_body[1], sample.accel_body[2]);
+			}
+
+			_publish_tail.store((tail + 1) % PUBLISH_QUEUE_CAPACITY);
+			_published_samples.fetch_add(1);
+
+			hrt_abstime first_timestamp = _publish_first_timestamp.load();
+
+			if (first_timestamp == 0) {
+				_publish_first_timestamp.store(sample.timestamp_sample);
+			}
+		}
+
+		while (px4_sem_wait(&_publisher_sem) != 0 && errno == EINTR) {}
+	}
+}
+
 void SCH16T::AccountMissedSlots(const hrt_abstime &cycle_start)
 {
 	if (_last_cycle_start != 0) {
@@ -477,23 +634,17 @@ void SCH16T::RunImpl()
 		accel_body[i] = (float)((double)accel_body[i] * SCH16T_PX4_ACCEL_MPS2_PER_LSB);
 	}
 
-	_px4_gyro.set_error_count(error_count);
-	_px4_gyro.set_temperature(temperature_c);
+	PendingSample pending_sample {};
+	pending_sample.timestamp_sample = timestamp_sample;
+	pending_sample.temperature_c = temperature_c;
+	pending_sample.error_count = error_count;
 
-	{
-		PerfScope publish_elapsed(_publish_elapsed_perf);
-		_px4_gyro.update(timestamp_sample, gyro_body[0], gyro_body[1], gyro_body[2]);
-
-		_px4_accel.set_error_count(error_count);
-		_px4_accel.set_temperature(temperature_c);
-		_px4_accel.update(timestamp_sample, accel_body[0], accel_body[1], accel_body[2]);
+	for (int i = 0; i < 3; i++) {
+		pending_sample.gyro_body[i] = gyro_body[i];
+		pending_sample.accel_body[i] = accel_body[i];
 	}
 
-	++_published_samples;
-
-	if (_publish_first_timestamp == 0) {
-		_publish_first_timestamp = timestamp_sample;
-	}
+	(void)QueueSample(pending_sample);
 }
 
 void SCH16T::print_status()
@@ -515,22 +666,29 @@ void SCH16T::print_status()
 	}
 
 	const hrt_abstime now = hrt_absolute_time();
+	const hrt_abstime publish_first_timestamp = _publish_first_timestamp.load();
+	const uint64_t published_samples = _published_samples.load();
 
-	if (_publish_first_timestamp != 0 && now > _publish_first_timestamp) {
-		const double average_hz = (double)_published_samples * 1e6 / (double)(now - _publish_first_timestamp);
+	if (publish_first_timestamp != 0 && now > publish_first_timestamp) {
+		const double average_hz = (double)published_samples * 1e6 / (double)(now - publish_first_timestamp);
 		PX4_INFO("poll %u us (%u Hz), published %llu samples, average %.1f Hz",
 			 (unsigned)SAMPLE_INTERVAL_US, 1000000 / SAMPLE_INTERVAL_US,
-			 (unsigned long long)_published_samples, average_hz);
+			 (unsigned long long)published_samples, average_hz);
 
 		if (_status_timestamp != 0 && now > _status_timestamp) {
-			const double recent_hz = (double)(_published_samples - _status_published_samples) * 1e6 /
+			const double recent_hz = (double)(published_samples - _status_published_samples) * 1e6 /
 						 (double)(now - _status_timestamp);
 			PX4_INFO("publish rate since last status: %.1f Hz", recent_hz);
 		}
 
 		_status_timestamp = now;
-		_status_published_samples = _published_samples;
+		_status_published_samples = published_samples;
 	}
+
+	const uint32_t queue_depth = (_publish_head.load() + PUBLISH_QUEUE_CAPACITY - _publish_tail.load())
+				     % PUBLISH_QUEUE_CAPACITY;
+	PX4_INFO("publisher queue: %u/%u samples, high-water %u", queue_depth, PUBLISH_QUEUE_CAPACITY - 1,
+		 _publish_queue_high_water);
 
 	perf_print_counter(_transfer_error_perf);
 	perf_print_counter(_crc_error_perf);
@@ -543,4 +701,6 @@ void SCH16T::print_status()
 	perf_print_counter(_run_elapsed_perf);
 	perf_print_counter(_capture_elapsed_perf);
 	perf_print_counter(_publish_elapsed_perf);
+	perf_print_counter(_publish_queue_age_perf);
+	perf_print_counter(_publish_queue_overflow_perf);
 }

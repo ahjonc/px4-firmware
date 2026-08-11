@@ -50,7 +50,11 @@
 #include <lib/drivers/accelerometer/PX4Accelerometer.hpp>
 #include <lib/drivers/gyroscope/PX4Gyroscope.hpp>
 #include <lib/perf/perf_counter.h>
+#include <px4_platform_common/atomic.h>
 #include <px4_platform_common/i2c_spi_buses.h>
+#include <px4_platform_common/sem.h>
+
+#include <pthread.h>
 
 #include "Sch16tSpidev.hpp"
 #include "sch16t_protocol.h"
@@ -76,12 +80,28 @@ private:
 	static constexpr uint32_t SAMPLE_INTERVAL_US{1240};
 	static constexpr unsigned BRINGUP_ATTEMPTS{3};
 	static constexpr unsigned MAX_CONSECUTIVE_FAILURES{64};
+	static constexpr uint32_t PUBLISH_QUEUE_CAPACITY{64};
+	static constexpr int PUBLISH_CPU{7};
+	static constexpr int PUBLISH_PRIORITY_OFFSET{-19};
+
+	struct PendingSample {
+		hrt_abstime timestamp_sample;
+		float gyro_body[3];
+		float accel_body[3];
+		float temperature_c;
+		uint32_t error_count;
+	};
 
 	int Bringup();
 	int BringupAttempt(uint64_t identity_responses[SCH16T_IDENTITY_FRAME_COUNT]);
 	int RunIdentityCycle(uint64_t responses[SCH16T_IDENTITY_FRAME_COUNT], struct sch16t_identity *identity);
 	int SoftReset();
 	int CaptureBatch(uint64_t responses[SCH16T_CAPTURE_FRAME_COUNT], hrt_abstime &timestamp_mid);
+	int StartPublisher();
+	void StopPublisher();
+	bool QueueSample(const PendingSample &sample);
+	void PublisherLoop();
+	static void *PublisherTrampoline(void *context);
 	void AccountMissedSlots(const hrt_abstime &cycle_start);
 	void CycleFailed(perf_counter_t counter);
 
@@ -111,8 +131,18 @@ private:
 	hrt_abstime _last_cycle_start{0};
 	uint64_t _missed_slots{0};
 
-	hrt_abstime _publish_first_timestamp{0};
-	uint64_t _published_samples{0};
+	PendingSample _publish_queue[PUBLISH_QUEUE_CAPACITY] {};
+	px4::atomic<uint32_t> _publish_head{0};
+	px4::atomic<uint32_t> _publish_tail{0};
+	px4::atomic_bool _publisher_should_exit{false};
+	px4_sem_t _publisher_sem {};
+	pthread_t _publisher_thread {};
+	bool _publisher_sem_initialized{false};
+	bool _publisher_started{false};
+	uint32_t _publish_queue_high_water{0};
+
+	px4::atomic<hrt_abstime> _publish_first_timestamp{0};
+	px4::atomic<uint64_t> _published_samples{0};
 	hrt_abstime _status_timestamp{0};
 	uint64_t _status_published_samples{0};
 
@@ -127,4 +157,6 @@ private:
 	perf_counter_t _run_elapsed_perf{perf_alloc(PC_ELAPSED, MODULE_NAME": run elapsed")};
 	perf_counter_t _capture_elapsed_perf{perf_alloc(PC_ELAPSED, MODULE_NAME": capture ioctl elapsed")};
 	perf_counter_t _publish_elapsed_perf{perf_alloc(PC_ELAPSED, MODULE_NAME": uORB publish elapsed")};
+	perf_counter_t _publish_queue_age_perf{perf_alloc(PC_ELAPSED, MODULE_NAME": publish queue age")};
+	perf_counter_t _publish_queue_overflow_perf{perf_alloc(PC_COUNT, MODULE_NAME": publish queue overflows")};
 };
