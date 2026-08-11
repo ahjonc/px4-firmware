@@ -82,8 +82,6 @@
 
 extern "C" {
 	__EXPORT int dsp_hitl_main(int argc, char *argv[]);
-	__EXPORT int fc_uart_rx_available(int fd, uint32_t *data);
-	__EXPORT int fc_uart_flush_rx(int fd);
 }
 
 namespace dsp_hitl
@@ -959,17 +957,7 @@ int readResponse(void *buf, size_t len)
 		return -1;
 	}
 
-	uint32_t rx_bytes_available = 0;
-	(void) fc_uart_rx_available(_uart_fd, &rx_bytes_available);
-	int bytes_read = 0;
-
-	if (rx_bytes_available) {
-		bytes_read = qurt_uart_read(_uart_fd, (char *) buf, len, ASYNC_UART_READ_WAIT_US);
-	}
-
-	// (void) fc_uart_flush_rx(_uart_fd);
-
-	return bytes_read;
+	return qurt_uart_read(_uart_fd, (char *) buf, len, ASYNC_UART_READ_WAIT_US);
 }
 
 int writeResponse(void *buf, size_t len)

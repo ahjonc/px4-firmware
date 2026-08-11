@@ -47,8 +47,9 @@ public:
 
 	/**
 	 * same as above except this generators the path based on the string.
+	 * The optional instance selects a multi-topic instance ("/obj/<name><instance>").
 	 */
-	static int node_mkpath(char *buf, const char *orbMsgName);
+	static int node_mkpath(char *buf, const char *orbMsgName, unsigned instance = 0);
 
 };
 

@@ -1,6 +1,6 @@
 ############################################################################
 #
-#   Copyright (c) 2022 ModalAI, Inc. All rights reserved.
+#   Copyright (c) 2026 PX4 Development Team. All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions
@@ -31,20 +31,30 @@
 #
 ############################################################################
 
-# Need to make sure that the Linux processor on VOXL2
-# knows about all parameters since it is acting as the
-# parameter server for other processors that may define
-# parameters that it doesn't normally know about.
-set(DISABLE_PARAMS_MODULE_SCOPING TRUE PARENT_SCOPE)
+# sch16t_protocol.c is the qualified SafeSPI protocol core, linked verbatim and
+# compiled as C (px4_add_module handles mixed C/C++ sources).
+px4_add_module(
+	MODULE drivers__imu__murata__sch16t_aeglos
+	MAIN sch16t
+	COMPILE_FLAGS
+	SRCS
+		SCH16T.cpp
+		SCH16T.hpp
+		Sch16tSpidev.cpp
+		Sch16tSpidev.hpp
+		sch16t_main.cpp
+		sch16t_protocol.c
+		sch16t_protocol.h
+		sch16t_px4_logic.h
+	DEPENDS
+		drivers_accelerometer
+		drivers_gyroscope
+		px4_work_queue
+	)
 
-add_library(drivers_board
-	board_config.h
-	init.c
-	spi.cpp
-    )
+# The posix platform compiles C sources with -D__KERNEL__; the dual-licensed
+# protocol core keys its include selection on that macro. Undefine it for the
+# verbatim file instead of editing it (byte-identity with the qualified source
+# is load-bearing).
+set_source_files_properties(sch16t_protocol.c PROPERTIES COMPILE_OPTIONS "-U__KERNEL__")
 
-# Add custom drivers
-add_subdirectory(${PX4_BOARD_DIR}/src/drivers/apps_sbus)
-
-# Add custom modules
-add_subdirectory(${PX4_BOARD_DIR}/src/modules/voxl_save_cal_params)

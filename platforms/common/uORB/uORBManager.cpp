@@ -49,6 +49,7 @@
 #include "uORBManager.hpp"
 
 #ifdef CONFIG_ORB_COMMUNICATOR
+#include "uORBNameEncoding.hpp"
 pthread_mutex_t uORB::Manager::_communicator_mutex = PTHREAD_MUTEX_INITIALIZER;
 #endif
 
@@ -313,9 +314,17 @@ orb_advert_t uORB::Manager::orb_advertise_multi(const struct orb_metadata *meta,
 #ifdef CONFIG_ORB_COMMUNICATOR
 
 	// Advertise to the remote side, but only if it is a local topic. Otherwise
-	// we will generate an advertisement loop.
-	if (_remote_topics.find(meta->o_name) == false) {
-		uORB::DeviceNode::topic_advertised(meta);
+	// we will generate an advertisement loop. Instance N > 0 of allowlisted
+	// topics crosses the wire as "<name>@<N>"; everything else remains stock.
+	{
+		const unsigned adv_instance = (instance != nullptr) ? (unsigned)*instance : 0;
+		char encoded[orb_maxpath];
+		const char *wire_name = uORB::NameEncoding::encode_wire_topic_name(meta->o_name, adv_instance,
+					encoded, sizeof(encoded));
+
+		if (_remote_topics.find(wire_name) == false) {
+			uORB::DeviceNode::topic_advertised(meta, adv_instance);
+		}
 	}
 
 #endif /* CONFIG_ORB_COMMUNICATOR */
@@ -592,12 +601,21 @@ int16_t uORB::Manager::process_remote_topic(const char *topic_name)
 {
 	PX4_DEBUG("entering process_remote_topic: name: %s", topic_name);
 
+	char base_name[orb_maxpath];
+	unsigned instance = 0;
+
+	if (!uORB::NameEncoding::decode_wire_topic_name(topic_name, base_name, sizeof(base_name),
+			ORB_MULTI_MAX_INSTANCES, &instance)) {
+		PX4_ERR("process_remote_topic name too long: %s", topic_name);
+		return -1;
+	}
+
 	// First make sure this is a valid topic
 	const struct orb_metadata *const *topic_list = orb_get_topics();
 	orb_id_t topic_ptr = nullptr;
 
 	for (size_t i = 0; i < orb_topics_count(); i++) {
-		if (strcmp(topic_list[i]->o_name, topic_name) == 0) {
+		if (strcmp(topic_list[i]->o_name, base_name) == 0) {
 			topic_ptr = topic_list[i];
 			break;
 		}
@@ -610,7 +628,7 @@ int16_t uORB::Manager::process_remote_topic(const char *topic_name)
 
 	// Look to see if we already have a node for this topic
 	char nodepath[orb_maxpath];
-	int ret = uORB::Utils::node_mkpath(nodepath, topic_name);
+	int ret = uORB::Utils::node_mkpath(nodepath, base_name, instance);
 
 	if (ret == OK) {
 		DeviceMaster *device_master = get_device_master();
@@ -619,6 +637,11 @@ int16_t uORB::Manager::process_remote_topic(const char *topic_name)
 			uORB::DeviceNode *node = device_master->getDeviceNode(nodepath);
 
 			if (node) {
+				if ((instance > 0) && node->is_advertised() && (_remote_topics.find(topic_name) == false)) {
+					PX4_ERR("process_remote_topic: local publisher conflict on %s, dropping", topic_name);
+					return -1;
+				}
+
 				PX4_DEBUG("Marking DeviceNode(%s) as advertised in process_remote_topic", topic_name);
 				node->mark_as_advertised();
 				_remote_topics.insert(topic_name);
@@ -630,7 +653,26 @@ int16_t uORB::Manager::process_remote_topic(const char *topic_name)
 	// We didn't find a node so we need to create it via an advertisement
 	PX4_DEBUG("Advertising remote topic %s", topic_name);
 	_remote_topics.insert(topic_name);
-	orb_advertise(topic_ptr, nullptr);
+
+	if (instance == 0) {
+		orb_advertise(topic_ptr, nullptr);
+
+	} else {
+		DeviceMaster *device_master = get_device_master();
+		int inst = (int)instance;
+
+		if (device_master && (device_master->advertise(topic_ptr, false, &inst) == PX4_OK)) {
+			uORB::DeviceNode *node = device_master->getDeviceNode(topic_ptr, (uint8_t)instance);
+
+			if (node) {
+				node->mark_as_advertised();
+			}
+
+		} else {
+			PX4_ERR("process_remote_topic failed to create node for %s", topic_name);
+			return -1;
+		}
+	}
 
 	return 0;
 }
@@ -640,8 +682,16 @@ int16_t uORB::Manager::process_add_subscription(const char *messageName)
 	PX4_DEBUG("entering Manager_process_add_subscription: name: %s", messageName);
 
 	int16_t rc = 0;
+	char base_name[orb_maxpath];
+	unsigned instance = 0;
+
+	if (!uORB::NameEncoding::decode_wire_topic_name(messageName, base_name, sizeof(base_name),
+			ORB_MULTI_MAX_INSTANCES, &instance)) {
+		return -1;
+	}
+
 	char nodepath[orb_maxpath];
-	int ret = uORB::Utils::node_mkpath(nodepath, messageName);
+	int ret = uORB::Utils::node_mkpath(nodepath, base_name, instance);
 	DeviceMaster *device_master = get_device_master();
 
 	if (ret == OK && device_master) {
@@ -668,8 +718,16 @@ int16_t uORB::Manager::process_add_subscription(const char *messageName)
 int16_t uORB::Manager::process_remove_subscription(const char *messageName)
 {
 	int16_t rc = -1;
+	char base_name[orb_maxpath];
+	unsigned instance = 0;
+
+	if (!uORB::NameEncoding::decode_wire_topic_name(messageName, base_name, sizeof(base_name),
+			ORB_MULTI_MAX_INSTANCES, &instance)) {
+		return -1;
+	}
+
 	char nodepath[orb_maxpath];
-	int ret = uORB::Utils::node_mkpath(nodepath, messageName);
+	int ret = uORB::Utils::node_mkpath(nodepath, base_name, instance);
 	DeviceMaster *device_master = get_device_master();
 
 	if (ret == OK && device_master) {
@@ -693,8 +751,16 @@ int16_t uORB::Manager::process_remove_subscription(const char *messageName)
 int16_t uORB::Manager::process_received_message(const char *messageName, int32_t length, uint8_t *data)
 {
 	int16_t rc = -1;
+	char base_name[orb_maxpath];
+	unsigned instance = 0;
+
+	if (!uORB::NameEncoding::decode_wire_topic_name(messageName, base_name, sizeof(base_name),
+			ORB_MULTI_MAX_INSTANCES, &instance)) {
+		return -1;
+	}
+
 	char nodepath[orb_maxpath];
-	int ret = uORB::Utils::node_mkpath(nodepath, messageName);
+	int ret = uORB::Utils::node_mkpath(nodepath, base_name, instance);
 	DeviceMaster *device_master = get_device_master();
 
 	if (ret == OK && device_master) {

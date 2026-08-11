@@ -128,11 +128,14 @@ public:
 	 * processes a request for topic advertisement from remote
 	 * @param meta
 	 *   The uORB metadata (usually from the ORB_ID() macro) for the topic.
+	 * @param instance
+	 *   The local multi-topic instance being advertised. Instance 0 keeps
+	 *   the stock bare-name wire format.
 	 * @return
 	 *   0 = success
 	 *   otherwise failure.
 	 */
-	static int16_t topic_advertised(const orb_metadata *meta);
+	static int16_t topic_advertised(const orb_metadata *meta, uint8_t instance = 0);
 
 	/**
 	 * processes a request for add subscription from remote

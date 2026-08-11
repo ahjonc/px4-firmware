@@ -40,6 +40,7 @@
 
 #ifdef CONFIG_ORB_COMMUNICATOR
 #include "uORBCommunicator.hpp"
+#include "uORBNameEncoding.hpp"
 #endif /* CONFIG_ORB_COMMUNICATOR */
 
 #if defined(__PX4_NUTTX)
@@ -280,8 +281,12 @@ uORB::DeviceNode::publish(const orb_metadata *meta, orb_advert_t handle, const v
 	uORBCommunicator::IChannel *ch = uORB::Manager::get_instance()->get_uorb_communicator();
 
 	if (ch != nullptr) {
-		if (ch->send_message(meta->o_name, meta->o_size, (uint8_t *)data) != 0) {
-			PX4_ERR("Error Sending [%s] topic data over comm_channel", meta->o_name);
+		char encoded[orb_maxpath];
+		const char *wire_name = NameEncoding::encode_wire_topic_name(meta->o_name, devnode->get_instance(),
+					encoded, sizeof(encoded));
+
+		if (ch->send_message(wire_name, meta->o_size, (uint8_t *)data) != 0) {
+			PX4_ERR("Error Sending [%s] topic data over comm_channel", wire_name);
 			return PX4_ERROR;
 		}
 	}
@@ -316,12 +321,14 @@ int uORB::DeviceNode::unadvertise(orb_advert_t handle)
 }
 
 #ifdef CONFIG_ORB_COMMUNICATOR
-int16_t uORB::DeviceNode::topic_advertised(const orb_metadata *meta)
+int16_t uORB::DeviceNode::topic_advertised(const orb_metadata *meta, uint8_t instance)
 {
 	uORBCommunicator::IChannel *ch = uORB::Manager::get_instance()->get_uorb_communicator();
 
 	if (ch != nullptr && meta != nullptr) {
-		return ch->topic_advertised(meta->o_name);
+		char encoded[orb_maxpath];
+		const char *wire_name = NameEncoding::encode_wire_topic_name(meta->o_name, instance, encoded, sizeof(encoded));
+		return ch->topic_advertised(wire_name);
 	}
 
 	return -1;
@@ -374,7 +381,9 @@ void uORB::DeviceNode::add_internal_subscriber()
 
 	if (ch != nullptr && _subscriber_count > 0) {
 		unlock(); //make sure we cannot deadlock if add_subscription calls back into DeviceNode
-		ch->add_subscription(_meta->o_name, 1);
+		char encoded[orb_maxpath];
+		const char *wire_name = NameEncoding::encode_wire_topic_name(_meta->o_name, _instance, encoded, sizeof(encoded));
+		ch->add_subscription(wire_name, 1);
 
 	} else
 #endif /* CONFIG_ORB_COMMUNICATOR */
@@ -394,7 +403,9 @@ void uORB::DeviceNode::remove_internal_subscriber()
 
 	if (ch != nullptr && _subscriber_count == 0) {
 		unlock(); //make sure we cannot deadlock if remove_subscription calls back into DeviceNode
-		ch->remove_subscription(_meta->o_name);
+		char encoded[orb_maxpath];
+		const char *wire_name = NameEncoding::encode_wire_topic_name(_meta->o_name, _instance, encoded, sizeof(encoded));
+		ch->remove_subscription(wire_name);
 
 	} else
 #endif /* CONFIG_ORB_COMMUNICATOR */
@@ -414,7 +425,9 @@ int16_t uORB::DeviceNode::process_add_subscription()
 	if (_data != nullptr && ch != nullptr) { // _data will not be null if there is a publisher.
 		// Only send the most recent data to initialize the remote end.
 		if (_data_valid) {
-			ch->send_message(_meta->o_name, _meta->o_size, _data + (_meta->o_size * ((_generation.load() - 1) % _meta->o_queue)));
+			char encoded[orb_maxpath];
+			const char *wire_name = NameEncoding::encode_wire_topic_name(_meta->o_name, _instance, encoded, sizeof(encoded));
+			ch->send_message(wire_name, _meta->o_size, _data + (_meta->o_size * ((_generation.load() - 1) % _meta->o_queue)));
 		}
 	}
 

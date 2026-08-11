@@ -114,11 +114,26 @@ hrt_abstime hrt_absolute_time()
 	px4_clock_gettime(CLOCK_MONOTONIC, &ts);
 
 # if defined(CONFIG_MUORB_APPS_SYNC_TIMESTAMP)
-	hrt_abstime temp_abstime = ts_to_abstime(&ts);
-	int apps_time_offset = fc_sensor_get_time_offset();
+	// FastRPC is too expensive for every timestamp read. Cache the DSP-to-APPS
+	// offset at 2 Hz and clamp the translated result monotonically across
+	// refresh jitter. Both clocks are on the same SoC oscillator.
+	static px4::atomic<int64_t> apps_time_offset{0};
+	static px4::atomic<uint64_t> last_refresh_us{0};
+	static px4::atomic<uint64_t> last_returned_us{0};
 
-	if (apps_time_offset < 0) {
-		hrt_abstime temp_offset = -apps_time_offset;
+	const hrt_abstime local_abstime = ts_to_abstime(&ts);
+	const uint64_t last_refresh = last_refresh_us.load();
+
+	if (last_refresh == 0 || (local_abstime - last_refresh) > 500000ULL) {
+		apps_time_offset.store((int64_t)fc_sensor_get_time_offset());
+		last_refresh_us.store(local_abstime);
+	}
+
+	hrt_abstime temp_abstime = local_abstime;
+	const int64_t cached_offset = apps_time_offset.load();
+
+	if (cached_offset < 0) {
+		hrt_abstime temp_offset = (hrt_abstime)(-cached_offset);
 
 		if (temp_offset >= temp_abstime) {
 			temp_abstime = 0;
@@ -128,7 +143,20 @@ hrt_abstime hrt_absolute_time()
 		}
 
 	} else {
-		temp_abstime += (hrt_abstime) apps_time_offset;
+		temp_abstime += (hrt_abstime)cached_offset;
+	}
+
+	uint64_t previous = last_returned_us.load();
+
+	while (true) {
+		if (temp_abstime <= previous) {
+			temp_abstime = previous;
+			break;
+		}
+
+		if (last_returned_us.compare_exchange(&previous, temp_abstime)) {
+			break;
+		}
 	}
 
 	ts.tv_sec = temp_abstime / 1000000;

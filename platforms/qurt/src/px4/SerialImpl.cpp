@@ -39,11 +39,6 @@
 
 #define MODULE_NAME "SerialImpl"
 
-extern "C" {
-	__EXPORT int fc_uart_rx_available(int fd, uint32_t *data);
-	__EXPORT int fc_uart_flush_rx(int fd);
-}
-
 namespace device
 {
 
@@ -170,9 +165,10 @@ ssize_t SerialImpl::bytesAvailable()
 		return -1;
 	}
 
-	uint32_t rx_bytes = 0;
-	(void) fc_uart_rx_available(_serial_fd, &rx_bytes);
-	return (ssize_t) rx_bytes;
+	// The VOXL Suite 1.6.4 SLPI callback ABI exposes open/read/write only.
+	// Returning zero preserves the caller's conservative path (service injected
+	// data first, then perform a bounded read) without requiring newer RFSA APIs.
+	return 0;
 }
 
 ssize_t SerialImpl::read(uint8_t *buffer, size_t buffer_size)
@@ -284,7 +280,7 @@ ssize_t SerialImpl::writeBlocking(const void *buffer, size_t buffer_size, uint32
 void SerialImpl::flush()
 {
 	if (_open) {
-		(void) fc_uart_flush_rx(_serial_fd);
+		(void) qurt_uart_flush_rx(_serial_fd);
 	}
 }
 

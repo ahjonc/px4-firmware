@@ -1,6 +1,6 @@
 /****************************************************************************
  *
- *   Copyright (c) 2022 ModalAI, Inc. All rights reserved.
+ *   Copyright (C) 2025 PX4 Development Team. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -31,29 +31,12 @@
  *
  ****************************************************************************/
 
-/**
- * @file board_config.h
- *
- * VOXL2 internal definitions
- */
+#include <px4_arch/spi_hw_description.h>
+#include <px4_platform_common/spi.h>
+#include <drivers/drv_sensor.h>
 
-#pragma once
+constexpr px4_spi_bus_t px4_spi_buses[SPI_BUS_MAX_BUS_ITEMS] = {
+	initSPIBus(1, {initSPIDevice(DRV_IMU_DEVTYPE_ICM42688P, 0), }),
+	initSPIBus(14, {initSPIDevice(DRV_IMU_DEVTYPE_SCH16T, 0), }), // J10 -> APPS QUP14, /dev/spidev14.0
+};
 
-#define BOARD_HAS_NO_RESET
-#define BOARD_HAS_NO_BOOTLOADER
-
-// Define this as empty since there are no I2C buses
-#define BOARD_I2C_BUS_CLOCK_INIT
-
-/* APPS SPI inventory: SLPI factory IMU plus J10/QUP14 SCH16T. */
-#define CONFIG_SPI 1
-#define BOARD_SPI_BUS_MAX_BUS_ITEMS 2
-
-#include <system_config.h>
-#include <px4_platform_common/board_common.h>
-
-#define BOARD_OVERRIDE_UUID "MODALAIVOXL20000" // must be of length 16
-#define PX4_SOC_ARCH_ID PX4_SOC_ARCH_ID_VOXL2
-
-#define VOXL_ESC_DEFAULT_PORT 	"2"
-#define VOXL2_IO_DEFAULT_PORT 	"2"

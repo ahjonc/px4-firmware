@@ -104,6 +104,10 @@ int qurt_uart_read(int fd, char *buf, size_t len, uint32_t timeout_us)
 	}
 
 	if (_callbacks_configured) {
+		if (timeout_us == 0) {
+			return _read_uart(fd, buf, len);
+		}
+
 		uint32_t interval_counter = (timeout_us + (UART_READ_POLL_INTERVAL_US - 1)) / UART_READ_POLL_INTERVAL_US;
 		// PX4_INFO("UART interval counter = %d", interval_counter);
 		int read_len = 0;
@@ -126,4 +130,25 @@ int qurt_uart_read(int fd, char *buf, size_t len, uint32_t timeout_us)
 	}
 
 	return -1;
+}
+
+int qurt_uart_flush_rx(int fd)
+{
+	if (!_callbacks_configured || fd < 0) {
+		return -1;
+	}
+
+	char discard[64];
+	int total = 0;
+	int read_len;
+
+	do {
+		read_len = _read_uart(fd, discard, sizeof(discard));
+
+		if (read_len > 0) {
+			total += read_len;
+		}
+	} while (read_len > 0);
+
+	return total;
 }

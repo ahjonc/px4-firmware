@@ -1,0 +1,6 @@
+menuconfig DRIVERS_IMU_MURATA_SCH16T_AEGLOS
+	bool "SCH16T Aeglos APPS SafeSPI"
+	default n
+	---help---
+		Enable support for murata SCH16T
+

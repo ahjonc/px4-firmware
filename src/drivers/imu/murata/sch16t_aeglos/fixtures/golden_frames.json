@@ -1,0 +1,188 @@
+{
+  "schema_version": "aeglos.sch16t.core.golden_frames.v1",
+  "scope": "Live-device SafeSPI frames used as the conformance fixture for core/protocol.",
+  "purpose": [
+    "Every consumer of the SCH16T links one protocol implementation. These frames are what the",
+    "device actually accepted and returned on the bench, so a decode or CRC change that would",
+    "diverge from the qualified wire behaviour fails here before it can reach a vehicle.",
+    "The frames are transcribed verbatim from the bring-up evidence records; core owns this copy",
+    "and does not read the evidence archive at build or test time."
+  ],
+  "provenance": {
+    "device": {
+      "part": "SCH16T-K01",
+      "serial_words_hex": ["0000", "3D09", "0398"],
+      "platform": "M0054",
+      "system_image": "1.8.06-M0054-14.1a-perf"
+    },
+    "sources": [
+      {
+        "id": "read_only_evidence",
+        "record": "aeglos.sch16t.read_only_evidence.v1",
+        "observed_at_utc": "2026-08-02T20:42:40Z",
+        "sha256": "fd79563ba8e9a818bdb6bff7ae5ce31f7c0e81e6159695a6e308f35e79f65c26",
+        "scope": "Post-power-cycle identity and SPI read-path qualification at 1 MHz."
+      },
+      {
+        "id": "functional_evidence",
+        "record": "aeglos.sch16t.functional_evidence.v2",
+        "observed_at_utc": "2026-08-02T21:25:15Z",
+        "sha256": "7e52aeb4587aa9388c93aaade9df261b04d925c3f925d2ece8b802ccfdaa4a96",
+        "scope": "Bounded polling initialization, status qualification, ten-sample acquisition."
+      },
+      {
+        "id": "reset_recovery_evidence",
+        "record": "aeglos.sch16t.reset_recovery_evidence.v1",
+        "observed_at_utc": "2026-08-02T21:08:08Z",
+        "sha256": "a2055a38ba9449baad3c15a3c42a96ce4b25a07ac7ec740c046d9534b328f296",
+        "scope": "Autonomous soft-reset recovery from a deterministically malformed response state."
+      }
+    ]
+  },
+  "frame_layout": {
+    "bits": 48,
+    "address_shift": 38,
+    "rw_bit": 37,
+    "ft_bit": 35,
+    "data_shift": 8,
+    "crc": {
+      "width": 8,
+      "polynomial": "0x2F",
+      "init": "0xFF",
+      "covers_bits": "47..8"
+    }
+  },
+  "identity_read_commands": {
+    "source": "read_only_evidence",
+    "note": "The seven-command identity cycle as sent on the wire. Frames 1 and 2 repeat ASIC_ID and frames 5 and 6 repeat SN_ID3 because SafeSPI replies are out of frame: a response arrives one command late, so the last request must be issued twice to read it back.",
+    "frames_hex": [
+      "0F0800000092",
+      "0EC800000009",
+      "0EC800000009",
+      "0F4800000065",
+      "0F8800000053",
+      "0FC8000000A4",
+      "0FC8000000A4"
+    ]
+  },
+  "identity_response_cycle": {
+    "source": "read_only_evidence",
+    "note": "Response frames carrying the identity words this device returned. The COMP_ID/ASIC_ID/serial values are the live ones; frame 0 is the priming reply and is never inspected.",
+    "frames_hex": [
+      "000000000000",
+      "079600002328",
+      "0776000021AC",
+      "0776000021AC",
+      "07B6000000C6",
+      "07D6003D0973",
+      "07F60003983F"
+    ],
+    "expected": {
+      "comp_id": "0x0023",
+      "asic_id": "0x0021",
+      "serial_id1": "0x0000",
+      "serial_id2": "0x3D09",
+      "serial_id3": "0x0398"
+    }
+  },
+  "validated_status_responses": {
+    "source": "functional_evidence",
+    "note": "Ten status responses the device returned after configuration, every one CRC-valid with the all-ones normal status word. Presented to the eleven-frame validator behind a zero priming frame, exactly as the acquisition path does.",
+    "priming_frame_hex": "000000000000",
+    "frames_hex": [
+      "028000FFFF2E",
+      "02A000FFFFC2",
+      "02C000FFFFD9",
+      "02E000FFFF35",
+      "030000FFFF42",
+      "032000FFFFAE",
+      "034000FFFFB5",
+      "036000FFFF59",
+      "038000FFFF83",
+      "03A000FFFF6F"
+    ],
+    "expected_data16": "0xFFFF"
+  },
+  "bringup_write_sequence": {
+    "source": "functional_evidence",
+    "note": "The complete ten-frame write sequence the functional probe put on the wire. It uses the bring-up filter generation (CTRL_FILT_ACC12/ACC3 = 0x01FF), not the qualified flight configuration, so it is a framing and CRC vector rather than a configuration expectation. Each entry pins sch16t_make_write_frame(address, value) against a frame the device accepted.",
+    "frames": [
+      { "hex": "0DA800000AC3", "address": "0x36", "value": "0x000A", "meaning": "SPI soft reset" },
+      {
+        "hex": "096800000016",
+        "address": "0x25",
+        "value": "0x0000",
+        "meaning": "CTRL_FILT_RATE, LPF0 68 Hz"
+      },
+      {
+        "hex": "09A80001FF8B",
+        "address": "0x26",
+        "value": "0x01FF",
+        "meaning": "CTRL_FILT_ACC12, bring-up generation"
+      },
+      {
+        "hex": "09E80001FF7C",
+        "address": "0x27",
+        "value": "0x01FF",
+        "meaning": "CTRL_FILT_ACC3, bring-up generation"
+      },
+      {
+        "hex": "0A28001324C7",
+        "address": "0x28",
+        "value": "0x1324",
+        "meaning": "CTRL_RATE, decimation 32, max K01 range"
+      },
+      {
+        "hex": "0A6800132430",
+        "address": "0x29",
+        "value": "0x1324",
+        "meaning": "CTRL_ACC12, decimation 32, max K01 range"
+      },
+      { "hex": "0AA8000000F8", "address": "0x2A", "value": "0x0000", "meaning": "CTRL_ACC3" },
+      {
+        "hex": "0D68000001D3",
+        "address": "0x35",
+        "value": "0x0001",
+        "meaning": "CTRL_MODE EN_SENSOR"
+      },
+      { "hex": "0D680000038D", "address": "0x35", "value": "0x0003", "meaning": "CTRL_MODE EOI" },
+      {
+        "hex": "0DA800000AC3",
+        "address": "0x36",
+        "value": "0x000A",
+        "meaning": "final SPI soft reset"
+      }
+    ]
+  },
+  "flight_config_write_commands": {
+    "note": "The qualified flight configuration manifest: seven writes, in order, that sch16t_config_write_commands() must produce. It differs from the bring-up sequence only in the two accelerometer filter words, which the qualified configuration leaves at 0x0000 (LPF0, 68 Hz). CTRL_USER_IF is deliberately absent.",
+    "operating_constraint": "Do not write CTRL_USER_IF = 0x0020 in the polling path. DRY_SYNC is unnecessary there and that write reproducibly disrupted subsequent SafeSPI responses on this unit until soft reset (config_stage_evidence, 2026-08-02).",
+    "frames_hex": [
+      "096800000016",
+      "09A800000020",
+      "09E8000000D7",
+      "0A28001324C7",
+      "0A6800132430",
+      "0AA8000000F8",
+      "0D68000001D3"
+    ]
+  },
+  "sequences": {
+    "soft_reset_command_hex": "0DA800000AC3",
+    "eoi_command_hex": "0D680000038D",
+    "note": "The soft reset is a single write; the reset-recovery record shows one such frame restored stable identity and CRC-valid reads without cycling the vehicle's shared 3.3 V rail. EOI closes the configuration transaction after EN_SENSOR."
+  },
+  "crc_vectors": {
+    "note": "Every frame above is a CRC vector. These two additionally pin single-bit corruption detection: the first is a frame the device returned, the second is that frame with its lowest CRC bit flipped.",
+    "valid_hex": "07F60003983F",
+    "corrupt_hex": "07F60003983E"
+  },
+  "scale_contract": {
+    "note": "Datasheet sensitivities for the maximum-range K01 configuration the flight config words select. Consumers convert to SI with these and nothing else.",
+    "gyro_lsb_per_dps": 1600,
+    "accel_lsb_per_mps2": 3200,
+    "temp_lsb_per_c": 100,
+    "temperature_decode": "arithmetic right shift by 4, then 0.01 C per LSB"
+  }
+}
+
