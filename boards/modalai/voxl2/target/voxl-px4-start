@@ -114,6 +114,7 @@ apply_m0054_parameter_contract()
         "MPC_XY_VEL_ALL -1.0" \
         "MPC_VEL_MANUAL 3.0" \
         "MPC_XY_CRUISE 3.0" \
+        "MPC_XY_VEL_MAX 3.0" \
         "MPC_Z_P 1.5" \
         "MPC_Z_VEL_MAX_DN 0.5" \
         "MPC_Z_V_AUTO_DN 0.5" \
